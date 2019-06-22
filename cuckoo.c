@@ -2,12 +2,11 @@
 #include "portable_endian.h"    // for htole32/64
 
 #define rotl(x, b) ((x) << (b)) | ((x) >> (64 - (b)))
-#define EBIT 15
-#define CLEN 12
+#define EBIT 10
+#define CLEN 8
 
-#define N 1 << EBIT
-#define M N << 1
-#define EN N+1
+#define EN 1 << EBIT
+#define M EN << 1
 #define MASK (1 << EBIT) - 1
 
 int graph[M];
