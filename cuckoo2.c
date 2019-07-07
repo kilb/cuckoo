@@ -5,14 +5,13 @@
 
 #define rotl(x, b) ((x) << (b)) | ((x) >> (64 - (b)))
 #define EBIT 20
-#define CLEN 12
+#define CLEN 13
 
 #define EN 1 << EBIT
 #define M EN << 1
 #define MASK (1 << EBIT) - 1
 
 int graph[M];
-int graph2[M];
 int V[EN], U[EN];
 int P1[EN], P2[EN];
 // int degree[M];
@@ -43,7 +42,7 @@ inline uint64_t siphash24(const uint64_t nonce) {
   v2 ^= 0xff;
   sip_round(); sip_round(); sip_round(); sip_round();
 
-  return (v0 ^ v1) ^ (v2  ^ v3);
+  return v0 ^ v1 ^ v2  ^ v3;
 }
 
 
@@ -53,6 +52,7 @@ inline int path(int b, int *P) {
         *(P+i) = b;
         b = graph[b];
         ++i;
+
     }
     *(P+i) = b;
     return i; 
@@ -64,19 +64,28 @@ int c_solve(uint32_t *prof, const uint8_t *mesg) {
  
   for(int i=0; i<M; ++i) {
       graph[i] = -1;
-      graph2[i] = -1;
+  }
+  
+  #pragma ivdep
+  for(uint64_t i=0; i<EN; ++i) {
+      U[i] = (siphash24(i<<1) & MASK) << 1;
+      V[i] = ((siphash24((i<<1)+1) & MASK) << 1) + 1;
   }
   
   for(uint64_t i=0; i<EN; ++i) {
-      int u = (siphash24(i<<1) & MASK) << 1;
-      int v = ((siphash24((i<<1)+1) & MASK) << 1) + 1;
-      
-      U[i] = u;
-      V[i] = v;
+      int u = U[i];
+      int v = V[i];
 
       int ui = path(u, P1);
       int vi = path(v, P2);
-
+      
+      int uii = ui;
+    //    if(P1[ui] != P2[vi])
+      while(uii > 0) {
+              graph[P1[uii]] = P1[uii-1];
+              --uii;
+          }
+graph[u] = -1;
       if(P1[ui] == P2[vi]) {
           --ui;
           --vi;
@@ -87,29 +96,34 @@ int c_solve(uint32_t *prof, const uint8_t *mesg) {
 
           if((ui+vi+2+1) == CLEN) {
               int j;
-              for(j=0; j<=ui; ++j) {
-                  graph2[P1[j]] = P1[j+1];
+              for(j=0; j<M; ++j) {
+                  graph[j] = -1;
               }
-             if(vi == -1) {
-                 graph2[P1[j]] = P1[0];
-             } else {
-                graph2[P1[j]] = P2[vi];
 
-                for(j=vi; j>0; --j) {
-                    graph2[P2[j]] = P2[j-1];
-                }
-                graph2[P2[j]] = P1[0];
-             }
+              for(j=0; j<=ui; ++j) {
+                  graph[P1[j]] = P1[j+1];
+              }
+             
+              if(vi == -1) {
+                  graph[P1[j]] = P1[0];
+              } else {
+                  graph[P1[j]] = P2[vi];
+
+                  for(j=vi; j>0; --j) {
+                     graph[P2[j]] = P2[j-1];
+                  }
+                  graph[P2[j]] = P1[0];
+              }
               int k = 0;
               int b = CLEN -1;
               for(j=0; k < b; ++j) {
                   int u = U[j];
                   int v = V[j];
 
-                  if(graph2[u] == v) {
+                  if(graph[u] == v) {
                       prof[k] = j;
                       ++k;
-                  } else if(graph2[v] == u) {
+                  } else if(graph[v] == u) {
                       prof[k] = j;
                       ++k;
                   }
@@ -118,18 +132,22 @@ int c_solve(uint32_t *prof, const uint8_t *mesg) {
               return 1;
           }
 
-      } else if(ui < vi) {
-          while(ui > 0) {
-              graph[P1[ui]] = P1[ui-1];
-              --ui;
-          }
+      } else if(ui < vi || 1) {
+        //   #pragma ivdep
+        //   while(ui > 0) {
+        //       graph[P1[ui]] = P1[ui-1];
+        //       --ui;
+        //   }
+
           graph[u] = v;
+
       } else {
-          while(vi > 0) {
-              graph[P2[vi]] = P2[vi-1];
-              --vi;
-          }
-          graph[v] = u;
+        //   #pragma ivdep
+        //   while(vi > 0) {
+        //       graph[P2[vi]] = P2[vi-1];
+        //       --vi;
+        //   }
+        //   graph[v] = u;
       }
 
   }
@@ -143,7 +161,7 @@ int main() {
     clock_t start, finish;
     double  duration;
     int k = 0;
-    int n = 30;
+    int n = 100;
     start = clock();
     for(int i=0; i<n; ++i) {
         msg[0] = i;
