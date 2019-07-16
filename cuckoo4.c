@@ -11,41 +11,40 @@
 #define M EN << 1
 #define MASK (1 << EBIT) - 1
 
-uint64_t k0, k1, k2, k3;
-uint64_t v0, v1, v2, v3;
 // set siphash keys from 32 byte char array
-void setkeys(const uint8_t *keybuf) {
-  k0 = htole64(((uint64_t *)keybuf)[0]);
-  k1 = htole64(((uint64_t *)keybuf)[1]);
-  k2 = htole64(((uint64_t *)keybuf)[2]);
-  k3 = htole64(((uint64_t *)keybuf)[3]);
-}
+#define setkeys() \
+  k0 = htole64(((uint64_t *)mesg)[0]); \
+  k1 = htole64(((uint64_t *)mesg)[1]); \
+  k2 = htole64(((uint64_t *)mesg)[2]); \
+  k3 = htole64(((uint64_t *)mesg)[3]);
 
-inline void sip_round() {
-  v0 += v1; v2 += v3; v1 = rotl(v1,13);
-  v3 = rotl(v3,16); v1 ^= v0; v3 ^= v2;
-  v0 = rotl(v0,32); v2 += v1; v0 += v3;
-  v1 = rotl(v1,17); v3 = rotl(v3,21);
-  v1 ^= v2; v3 ^= v0; v2 = rotl(v2,32);
-}
 
-inline uint64_t siphash24(const uint64_t nonce) {
-  v0 = k0; v1 = k1; v2 = k2; v3 = k3;
-  v3 ^= nonce;
-  sip_round(); sip_round();
-  v0 ^= nonce;
-  v2 ^= 0xff;
-  sip_round(); sip_round(); sip_round(); sip_round();
+#define sip_round() \
+  v0 += v1; v2 += v3; v1 = rotl(v1,13); \
+  v3 = rotl(v3,16); v1 ^= v0; v3 ^= v2; \
+  v0 = rotl(v0,32); v2 += v1; v0 += v3; \
+  v1 = rotl(v1,17); v3 = rotl(v3,21); \
+  v1 ^= v2; v3 ^= v0; v2 = rotl(v2,32); 
 
-  return v0 ^ v1 ^ v2  ^ v3;
-}
+#define siphash24( nonce ) ({\
+  v0 = k0; v1 = k1; v2 = k2; v3 = k3; \
+  v3 ^= (nonce); \
+  sip_round(); sip_round(); \
+  v0 ^= (nonce); \
+  v2 ^= 0xff; \
+  sip_round(); sip_round(); sip_round(); sip_round(); \
+  (v0 ^ v1 ^ v2  ^ v3); \
+})
 
 int c_solve(uint32_t *prof, const uint8_t *mesg) {
   int graph[M];
   int V[EN], U[EN];
   int path[CLEN];
+
+  uint64_t k0, k1, k2, k3;
+  uint64_t v0, v1, v2, v3;
   
-  setkeys(mesg);
+  setkeys();
  
   for(int i=0; i<M; ++i) {
       graph[i] = -1;
@@ -53,8 +52,8 @@ int c_solve(uint32_t *prof, const uint8_t *mesg) {
   
   #pragma ivdep
   for(uint64_t i=0; i<EN; ++i) {
-      U[i] = (siphash24(i<<1) & MASK) << 1;
-      V[i] = ((siphash24((i<<1)+1) & MASK) << 1) + 1;
+      U[i] = ( siphash24((i << 1)) & MASK) << 1;
+      V[i] = (((siphash24(((i<<1)+1))) & MASK) << 1) + 1;
   }
   
   for(uint64_t i=0; i<EN; ++i) {

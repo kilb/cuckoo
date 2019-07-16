@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 #define rotl(x, b) ((x) << (b)) | ((x) >> (64 - (b)))
-#define EBIT 20
+#define EBIT 15
 #define CLEN 12
 
 #define EN 1 << EBIT
@@ -143,7 +143,7 @@ int main() {
     clock_t start, finish;
     double  duration;
     int k = 0;
-    int n = 30;
+    int n = 100;
     start = clock();
     for(int i=0; i<n; ++i) {
         msg[0] = i;
