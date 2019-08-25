@@ -12,6 +12,8 @@
 #define EBIT 15
 #define CLEN 12
 
+#define rotl(x, b) ((x) << (b)) | ((x) >> (64 - (b)))
+
 #define ROL(x, b)   _mm512_rol_epi64 ((x), (b))
 #define SL(x, b)    _mm512_slli_epi64((x), (b))
 #define AND(a, b)   _mm512_and_epi64 ((a), (b))
@@ -37,19 +39,19 @@
 
 #define sip_round() \
   v0 = ADD(v0,v1); v2 = ADD(v2,v3); v1 = ROL(v1,13); \
-  v3 = ROL(v3,16); v1 = XOR(v1, v0); v3 = XOR(v3,v2); \
+  v3 = ROL(v3,16); v1 = XOR(v1,v0); v3 = XOR(v3,v2); \
   v0 = ROL(v0,32); v2 = ADD(v2, v1); v0 = ADD(v0, v3); \
   v1 = ROL(v1,17); v3 = ROL(v3,21); \
-  v1 ^= v2; v3 ^= v0; v2 = ROL(v2,32); 
+  v1 = XOR(v1,v2); v3 = XOR(v3,v0); v2 = ROL(v2,32); 
 
-#define siphash24() ({\
+#define siphash24( r ) ({\
   v0 = k0; v1 = k1; v2 = k2; v3 = k3; \
   v3 = XOR(v3, nonce); \
   sip_round(); sip_round(); \
   v0 = XOR(v0, nonce); \
   v2 = XOR(v2, k4); \
   sip_round(); sip_round(); sip_round(); sip_round(); \
-  h = OR(SL(AND(XOR(XOR(XOR(v0,v1),v2),v3), mask),1), flag); \
+  r = SL(AND(XOR(XOR(XOR(v0,v1),v2),v3), mask),1); \
 })
 
 /****** random ******/
@@ -404,7 +406,7 @@ void b2setup(blake2b_state *S) {
 /***** SOVE *****/
 int c_solve(uint32_t *prof, uint64_t *nonc, const uint8_t *hash) {
   int graph[M];
-  uint64_t *G = _mm_malloc(sizeof(uint64_t) * M, 64);
+  uint64_t *G = _mm_malloc(sizeof(uint64_t) * EN, 64);
   int path[CLEN];
 
   uint8_t pmesg[40];
@@ -414,12 +416,13 @@ int c_solve(uint32_t *prof, uint64_t *nonc, const uint8_t *hash) {
 
   u512 k0, k1, k2, k3, k4;
   u512 v0, v1, v2, v3, nonce, mask, flag;
-  u512 h;
-  uint64_t e3,e2,e1,e0;
+  u512 lu, lv;
+  uint64_t e7,e6,e5,e4,e3,e2,e1,e0;
+  int u, v;
   
   k4 = SET(0xff);
   mask = SET(MASK);
-  flag = SET8(1,0,1,0,1,0,1,0);
+  flag = SET8(1,1,1,1,1,1,1,1);
 
   b2setup(&S);
   
@@ -430,7 +433,6 @@ int c_solve(uint32_t *prof, uint64_t *nonc, const uint8_t *hash) {
     blake2b_state tmp = S;
     blake2b_update(&tmp, pmesg, 40);
     blake2b_final(&tmp, mesg, 32);
-memcpy(mesg, hash, 32);
     setkeys();
     
     #pragma ivdep
@@ -439,22 +441,22 @@ memcpy(mesg, hash, 32);
     }
     #pragma ivdep
     for(uint64_t i=0, j=0; i<EN; j+=8) {
-        // e0 = i << 1; e1 = (i<<1) | 1; ++i;
-        // e2 = i << 1; e3 = (i<<1) | 1; ++i;
-        // e4 = i << 1; e5 = (i<<1) | 1; ++i;
-        // e6 = i << 1; e7 = (i<<1) | 1; ++i;
-        // nonce = SET8(e7,e6,e5,e4,e3,e2,e1,e0);
-
-        e0 = i; ++i; e1 = i; ++i;
-        e2 = i; ++i; e3 = i; ++i;
-        nonce = (SET8(e3,e3,e2,e2,e1,e1,e0,e0) << 1) | flag;
-        siphash24();
-        STORE(G+j, h);
+        e0 = i << 1; ++i; e1 = i << 1; ++i;
+        e2 = i << 1; ++i; e3 = i << 1; ++i;
+        e4 = i << 1; ++i; e5 = i << 1; ++i;
+        e6 = i << 1; ++i; e7 = i << 1; ++i;
+        nonce = SET8(e7,e6,e5,e4,e3,e2,e1,e0);
+        siphash24(lu);
+  
+        nonce = OR(nonce, flag);
+        siphash24(lv);
+        lv = SL(OR(lv, flag), 32);
+        STORE(G+j, OR(lu, lv));
     }
 
-    for(uint64_t i=0; i<M;) {
-        uint64_t u = G[i]; ++i;
-        uint64_t v = G[i]; ++i;
+    for(uint64_t i=0; i<EN; ++i) {
+        u = G[i] & 0xffffffff;
+        v = G[i] >> 32;
 
         int pre = -1;
         int cur = u;
@@ -493,17 +495,17 @@ memcpy(mesg, hash, 32);
 
                 int k = 0;
                 int b = CLEN -1;
-                for(j=0; k < b; ) {
-                    uint64_t u = G[j]; ++j;
-                    uint64_t v = G[j]; ++j;
+                for(j=0; k < b; ++j) {
+                    u = G[j] & 0xffffffff;
+                    v = G[j] >> 32;
 
                     if(graph[u] == v || graph[v] == u) {
-                        prof[k] = (j >> 1) - 1;
+                        prof[k] = j;
                         ++k;
                     }
                 }
 
-                prof[k] = (i >> 1) -1;
+                prof[k] = i;
                 *nonc = le64toh(((uint64_t *)pmesg)[0]);
                 _mm_free(G);
                 return gs;
@@ -514,7 +516,6 @@ memcpy(mesg, hash, 32);
   _mm_free(G);
   return 0;
 }
-
 
 #include "time.h"
 #include <stdio.h>
@@ -530,6 +531,8 @@ int main() {
     int n = 100;
     start = clock();
 
+    // for(int i=0; i<n; ++i)
+
     for(int i=0; i<40; ++i)
     msg[i] = 0;
 
@@ -537,10 +540,10 @@ int main() {
         msg[0] = i;
         if (c_solve(proof, &nonc, msg)) {
             ++k;
-            for(int i=0; i<CLEN; ++i) {
-              printf("%d, ", proof[i]);
-            }
-            printf(", %lu\n", nonc);
+            // for(int i=0; i<CLEN; ++i) {
+            //   printf("%d, ", proof[i]);
+            // }
+            // printf(", %lu\n", nonc);
         }
     }
     finish = clock();

@@ -408,12 +408,12 @@ int c_solve(uint32_t *prof, uint64_t *nonc, const uint8_t *hash) {
   
   memcpy(pmesg+8, hash, 32);
   
-  for(int gs=1; gs<100; ++gs) {
+  for(int gs=1; gs<2; ++gs) {
     RAND_bytes(pmesg, 8);
     blake2b_state tmp = S;
     blake2b_update(&tmp, pmesg, 40);
     blake2b_final(&tmp, mesg, 32);
-
+memcpy(mesg, hash, 32);
     setkeys();
     
     for(int i=0; i<M; ++i) {
@@ -500,11 +500,18 @@ int main() {
     int k = 0;
     int n = 100;
     start = clock();
+    
+    for(int i=0; i<40; ++i)
+    msg[i] = 0;
 
     for(int i=0; i<n; ++i) {
         msg[0] = i;
         if (c_solve(proof, &nonc, msg)) {
             ++k;
+            for(int i=0; i<CLEN; ++i) {
+              printf("%d, ", proof[i]);
+            }
+            printf(", %ld\n", nonc);
         }
     }
     finish = clock();

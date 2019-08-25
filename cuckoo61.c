@@ -37,20 +37,20 @@
 
 #define sip_round() \
   v0 = ADD(v0,v1); v2 = ADD(v2,v3); v1 = ROL(v1,13); \
-  v3 = ROL(v3,16); v1 = XOR(v1, v0); v3 = XOR(v3,v2); \
+  v3 = ROL(v3,16); v1 ^= v0; v3 ^= v2; \
   v0 = ROL(v0,32); v2 = ADD(v2, v1); v0 = ADD(v0, v3); \
   v1 = ROL(v1,17); v3 = ROL(v3,21); \
   v1 ^= v2; v3 ^= v0; v2 = ROL(v2,32); 
 
 #define siphash24() ({\
   v0 = k0; v1 = k1; v2 = k2; v3 = k3; \
-  v3 = XOR(v3, nonce); \
+  v3 ^= nonce; \
   sip_round(); sip_round(); \
-  v0 = XOR(v0, nonce); \
-  v2 = XOR(v2, k4); \
+  v0 ^= nonce; \
+  v2 ^= k4; \
   sip_round(); sip_round(); sip_round(); sip_round(); \
-  h = OR(SL(AND(XOR(XOR(XOR(v0,v1),v2),v3), mask),1), flag); \
-})
+  h = SL(((v0 ^ v1 ^ v2 ^ v3) & mask), 1) | flag; \
+  })
 
 /****** random ******/
 uint64_t random_u64() {
@@ -433,23 +433,21 @@ int c_solve(uint32_t *prof, uint64_t *nonc, const uint8_t *hash) {
 memcpy(mesg, hash, 32);
     setkeys();
     
+    // #pragma ivdep
+    // for(int i=0; i<M; ++i) {
+    //     graph[i] = -1;
+    // }
     #pragma ivdep
-    for(int i=0; i<M; ++i) {
-        graph[i] = -1;
-    }
-    #pragma ivdep
-    for(uint64_t i=0, j=0; i<EN; j+=8) {
-        // e0 = i << 1; e1 = (i<<1) | 1; ++i;
-        // e2 = i << 1; e3 = (i<<1) | 1; ++i;
-        // e4 = i << 1; e5 = (i<<1) | 1; ++i;
-        // e6 = i << 1; e7 = (i<<1) | 1; ++i;
-        // nonce = SET8(e7,e6,e5,e4,e3,e2,e1,e0);
-
+    for(uint64_t i=0, j=0; i<EN;) {
         e0 = i; ++i; e1 = i; ++i;
         e2 = i; ++i; e3 = i; ++i;
         nonce = (SET8(e3,e3,e2,e2,e1,e1,e0,e0) << 1) | flag;
         siphash24();
         STORE(G+j, h);
+        graph[j] = -1; ++j; graph[j] = -1; ++j;
+        graph[j] = -1; ++j; graph[j] = -1; ++j;
+        graph[j] = -1; ++j; graph[j] = -1; ++j;
+        graph[j] = -1; ++j; graph[j] = -1; ++j;
     }
 
     for(uint64_t i=0; i<M;) {
